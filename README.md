@@ -331,3 +331,133 @@ React 推崇单向数据流，用受控组件模拟类似效果
 后台系统/表单页 → 用 Vue 双向绑定提速开发
 大型应用/复杂逻辑 → 用 React 单向流确保可控性
 我在电商后台项目中用 Vue 的 v-model 处理 50+ 表单字段，开发效率提升 60%。
+# 六、面试官：Vue中的v-show和v-if怎么理解？
+理解 v-show 和 v-if 的核心在于渲染机制、性能影响和适用场景的深层次区别。面试官期待你不仅知道表面差异，更能阐述其底层原理和工程决策依据
+## 1、v-show与v-if的共同点
+vue中v-show 与v-if的作用效果是相同的（清楚v-else），页面中的控制元素是否显示
+* 当表达为true的时候，都会讨论页面的位置
+* 当表达都false为时，都不会关注页面位置
+```
+<Model v-show="isShow" />
+<Model v-if="isShow" />
+```
+## 2、v-show与v-if的区别
+* 控制手段不同
+* 编译过程不同
+* 编译条件不同
+控制手段：v-show隐藏一个元素为该元素添加css--display:none，dom元素仍在。v-if显示隐藏一个dom元素整个添加或删除
+
+编译过程：v-if切换有一个局部编译/卸载的过程，切换过程中合适地内部和重建内部的事件监听和子组件v-show只是；简单的基于css切换
+
+编译条件：v-if是真正的条件渲染，它能保证在切换过程中条件块内部的事件监听器和子组件适当地被重构。只有渲染条件为假时，并不做操作，直到真正的渲染
+
+* v-show通过指定false的true时间不会触发组件的生命周期
+
+* v-if由false的true时候，触发组件的beforeCreate、create、beforeMount、mounted钩子，由之前true的false触发时组件的beforeDestory、destoryed方法
+
+* 性能消耗：v-if有更高的切换消耗；v-show有更高的最终渲染消耗
+
+## v-show与v-if原理分析 核心区别
+* v-if--条件渲染
+  * v-if在实现上比v-show要复杂的多，因为还有else else-if等条件需要处理，这里我们也只摘抄源码中处理v-if的一小部分
+  * 返回一个node节点，render函数通过表达式的值来决定是否生成DOM
+  * 机制： 真正的条件渲染。表达式为 false 时，Vue 不会渲染该元素及其子组件到 DOM 中。元素及其事件监听器、子组件都会被销毁和重建
+  * 编译结果： Vue 的编译器会将 v-if 编译成 JavaScript 的条件语句：三元表达式或 if...else 块
+  * 生命周期： 切换时触发组件的完整生命周期钩子
+  * 初始渲染成本： 如果初始为 false，成本为 0
+  * 切换成本： 高。涉及 DOM 的创建/销毁、组件实例的创建/销毁、生命周期钩子的执行
+```
+// https://github.com/vuejs/vue-next/blob/cdc9f336fd/packages/compiler-core/src/transforms/vIf.ts
+export const transformIf = createStructuralDirectiveTransform(
+  /^(if|else|else-if)$/,
+  (node, dir, context) => {
+    return processIf(node, dir, context, (ifNode, branch, isRoot) => {
+      // ...
+      return () => {
+        if (isRoot) {
+          ifNode.codegenNode = createCodegenNodeForBranch(
+            branch,
+            key,
+            context
+          ) as IfConditionalExpression
+        } else {
+          // attach this branch's codegen node to the v-if root.
+          const parentCondition = getParentCondition(ifNode.codegenNode!)
+          parentCondition.alternate = createCodegenNodeForBranch(
+            branch,
+            key + ifNode.branches.length - 1,
+            context
+          )
+        }
+      }
+    })
+  }
+)
+```
+* v-show--条件显示
+  * 无论初始条件是什么，元素总是会被渲染
+  * 机制： 无论条件如何，元素始终会被编译并渲染到 DOM 中。表达式为 false 时，Vue 仅通过内联 CSS (display: none;) 切换元素的可见性。
+  * 编译结果： Vue 的编译器会将 v-show 编译成一个内联样式绑定（如 style="display: none;"）
+  * 生命周期： 不会触发任何生命周期钩子（元素始终存在，只是显示/隐藏）
+  * 初始渲染成本： 无论初始条件如何，都需要进行完整的 DOM 渲染和组件实例化
+  * 切换成本： 低。仅修改 CSS 的 display 属性，触发浏览器的重绘（Repaint），通常不触发昂贵的重排
+```
+// https://github.com/vuejs/vue-next/blob/3cd30c5245da0733f9eb6f29d220f39c46518162/packages/runtime-dom/src/directives/vShow.ts
+export const vShow: ObjectDirective<VShowElement> = {
+  beforeMount(el, { value }, { transition }) {
+    el._vod = el.style.display === 'none' ? '' : el.style.display
+    if (transition && value) {
+      transition.beforeEnter(el)
+    } else {
+      setDisplay(el, value)
+    }
+  },
+  mounted(el, { value }, { transition }) {
+    if (transition && value) {
+      transition.enter(el)
+    }
+  },
+  updated(el, { value, oldValue }, { transition }) {
+    // ...
+  },
+  beforeUnmount(el, { value }) {
+    setDisplay(el, value)
+  }
+}
+```
+## 使用场景
+
+v-if与页面显示中的全面v-show控制元素dom
+
+v-if相比v-show顶部更大的（直接操作dom节点增加与删除）
+
+如果需要非常频繁地切换，则使用 v-show 更好
+
+如果在运行时条件很少改变，则使用 v-if 更好
+
+## 高级技巧与注意事项
+
+* v-if 与 v-else / v-else-if： 可以组合使用，形成逻辑分支。编译器会确保同一时间只有一个分支被渲染。
+
+* <template> 标签与 v-if： 可以在 <template> 上使用 v-if 控制一组元素/组件的渲染，而不添加额外 DOM 节点。
+
+* v-show 与 <template>： 不能在 <template> 上使用 v-show，因为 <template> 本身不会被渲染，无法应用 display 样式。
+
+* v-if 的惰性 (Lazy)： v-if 是"惰性"的：如果初始条件为 false，其内部的内容/组件直到条件首次变为 true 时才会开始渲染。
+
+* v-show 与 CSS display： v-show 仅控制 display。如果元素本身有其他方式隐藏（如 visibility: hidden 或 opacity: 0），v-show 的 display: none 会覆盖它们。
+
+* 性能测量： 在极端性能敏感场景，使用 Chrome DevTools 的 Performance 面板测量切换 v-if 和 v-show 时的实际耗时和重绘/重排情况，以数据驱动决策。
+
+## 回答规范
+
+Vue 的 v-if 和 v-show 都用于条件性显示内容，但其核心区别在于渲染机制和性能模型。
+
+v-if 是真正的条件渲染。 当条件为假时，它确保元素及其子组件完全不被渲染到 DOM 树中，相关组件实例会被销毁。这意味着初始条件为假时节省资源，但切换时涉及完整的组件销毁/重建和生命周期钩子执行，成本较高。它适用于初始可能隐藏、切换不频繁或包含重量级子组件的场景。
+
+v-show 本质是 CSS 显示切换。 无论条件如何，元素始终会被渲染到 DOM 中，条件为假时仅通过内联 display: none; 隐藏。因此它的初始渲染成本固定（即使隐藏也需渲染），但切换成本极低，仅修改 CSS 属性。这使其成为需要频繁切换（如选项卡、折叠菜单）或需要保持组件内部状态（如表单输入值）场景的首选。
+
+工程选择依据性能数据与需求： 在高级开发中，我们基于具体场景做决策：关注初始加载性能选 v-if，优化高频交互选 v-show。对于复杂组件，我会用 DevTools 分析渲染耗时，确保选择带来最佳用户体验。理解 Vue 底层如何编译它们（v-if 生成条件语句块，v-show 生成样式绑定）也有助于调试和优化。
+
+# Vue实例挂载的过程中发生了什么？
+
